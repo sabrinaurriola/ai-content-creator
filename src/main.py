@@ -2,111 +2,108 @@
 main.py
 AI Content Creator - Entry point
 
-Run:  python src/main.py            (provider from .env, default openai)
-      python src/main.py mock       (free test run, no API key needed)
+Run:
+    python src/main.py "When should companies use RAG?" linkedin jane_doe
+    python src/main.py "When should companies use RAG?" linkedin jane_doe --mock   (free test)
+    python src/main.py --help                                                      (all options)
 """
+import argparse
 import sys
 
+from dotenv import load_dotenv
+
 from content_pipeline import ContentPipeline
-from prompt_templates import PLATFORM_RULES, FORMAT_RULES
+from prompt_templates import PLATFORM_RULES, FORMAT_RULES, DEFAULT_FORMAT
+
+REVIEW_QUESTION = "\nFeedback to rewrite, Enter to approve, q to quit: "
 
 
-def choose(label, options, default=None):
-    """Show a numbered list and return the chosen option."""
-    print(f"\n{label}")
-    for i, option in enumerate(options, 1):
-        marker = " (default)" if option == default else ""
-        print(f"  {i}. {option}{marker}")
-    while True:
-        answer = input("> ").strip()
-        if not answer and default:
-            return default
-        if answer.isdigit() and 1 <= int(answer) <= len(options):
-            return options[int(answer) - 1]
-        print("  Please type a number from the list.")
+# --------------------------------------------------
+# 1. COMMAND-LINE INPUT
+# --------------------------------------------------
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Write a post in a consultant's own voice.")
+    parser.add_argument("topic", help='What the post is about, e.g. "When should companies use RAG?"')
+    parser.add_argument("platform", choices=list(PLATFORM_RULES), type=str.lower)
+    parser.add_argument("consultant", help="Profile file name without extension, e.g. jane_doe")
+    parser.add_argument("--format", default=DEFAULT_FORMAT, choices=list(FORMAT_RULES))
+    parser.add_argument("--audience", default="Business leaders")
+    parser.add_argument("--objective", default="Educate")
+    parser.add_argument("--extra", default="", help="Extra instructions for the writer")
+    parser.add_argument("--mock", action="store_true", help="Free test run, no API call")
+    parser.add_argument("--baseline", action="store_true",
+                        help="Also save a generic post (no brand voice, no RAG) for comparison")
+    return parser.parse_args()
 
 
-def ask(label, default):
-    answer = input(f"{label} [{default}]: ").strip()
-    return answer or default
-
+# --------------------------------------------------
+# 2. DISPLAY
+# --------------------------------------------------
 
 def show(version):
     print("\n" + "=" * 60)
     if version["status"] == "failed":
         print(f"❌ Generation failed: {version['error']}")
+        print("   Press Enter to try again, or q to quit.")
     else:
-        print(f"📝 Version {version['version']}  ({version['model']}, "
+        print(f"📝 Draft {version['version']}  ({version['model']}, "
               f"{version['input_tokens']}+{version['output_tokens']} tokens, "
               f"{version['latency_s']}s)")
         print("=" * 60 + "\n" + version["text"])
     print("=" * 60)
 
 
+# --------------------------------------------------
+# 3. RUN: build prompt -> draft -> human review -> save
+# --------------------------------------------------
+
 def main():
-    provider = sys.argv[1] if len(sys.argv) > 1 else None
-    pipeline = ContentPipeline(provider=provider)
+    load_dotenv()
+    args = parse_args()
+    pipeline = ContentPipeline(mock=args.mock)
 
-    # 1. Document
-    print("📚 Loading knowledge base...")
-    stats = pipeline.prepare_knowledge_base()
-    print(f"   {stats['pieces']} pieces, {stats['rag_chunks']} RAG chunks, "
-          f"retrieval: {'RAG index' if stats['rag'] else 'keyword search (temporary)'}")
-    if not stats["consultants"]:
-        sys.exit("No consultant profiles found in knowledge_base/primary/.")
+    try:
+        stats = pipeline.prepare_knowledge_base()
+        request = {"topic": args.topic, "platform": args.platform, "format": args.format,
+                   "audience": args.audience, "objective": args.objective,
+                   "additional_instructions": args.extra}
+        session = pipeline.start_session(args.consultant, request)
+    except (RuntimeError, ValueError, FileNotFoundError) as error:
+        sys.exit(f"❌ {error}")
 
-    # 2. Collect the request (Monitor suggestions included)
-    consultant = choose("Which consultant?", stats["consultants"])
-    ideas = pipeline.suggest_topics()
-    if ideas:
-        print("\n💡 Topic ideas from the research documents:")
-        for idea in ideas:
-            print(f"   - {idea}")
-    topic = ""
-    while not topic:
-        topic = input("\nTopic: ").strip()
-
-    request = {
-        "topic": topic,
-        "platform": choose("Platform?", list(PLATFORM_RULES), "linkedin"),
-        "format": choose("Format?", list(FORMAT_RULES), "professional_insight"),
-        "audience": ask("Audience", "Business leaders"),
-        "objective": ask("Objective", "Educate"),
-        "additional_instructions": input("Extra instructions (optional): ").strip(),
-    }
-
-    # 3. Brief + 4. Publish
-    session = pipeline.start_session(consultant, request)
-    print("\n🔎 Sources used:")
-    for source in session["brief"]["sources"] or ["(none found)"]:
+    print(f"📚 {stats['pieces']} pieces loaded · consultant: {session['consultant']}")
+    print("🔎 Sources used:")
+    for source in session["sources"] or ["(none found)"]:
         print(f"   {source}")
     show(pipeline.run(session))
 
-    # 5. Iterate until approved or quit
+    # Human review: feedback -> rewrite, Enter -> approve, q -> quit
     while True:
-        action = input("\n[a]pprove  [r]evise  [b]aseline (generic)  [q]uit > ").strip().lower()
-        if action == "a":
-            try:
-                pipeline.approve(session)
-                print(f"✅ Approved. Saved in {session['folder']}")
-                break
-            except ValueError as error:
-                print(f"⚠️  {error}")
-        elif action == "r":
-            feedback = input("Your feedback: ").strip()
-            if feedback:
-                show(pipeline.run(session, feedback=feedback))
-        elif action == "b":
-            result = pipeline.generate_baseline(session)
-            print("\n--- Generic baseline (no brand voice, no RAG) ---")
-            print(result["text"] if result["status"] == "success" else result["error"])
-        elif action == "q":
-            print(f"💾 Drafts saved in {session['folder']}")
+        answer = input(REVIEW_QUESTION).strip()
+        latest = session["versions"][-1]
+
+        if answer.lower() == "q":
+            print("Stopped without approving. Drafts are in outputs/drafts/.")
+            return
+        if not answer and latest["status"] == "failed":
+            show(pipeline.run(session, feedback=latest["feedback"]))   # retry same request
+        elif not answer:
+            path = pipeline.approve(session)
+            print(f"✅ Approved and saved: {path}")
             break
+        else:
+            show(pipeline.run(session, feedback=answer))      # rewrite
+
+    if args.baseline:
+        try:
+            print(f"📄 Generic baseline saved: {pipeline.generate_baseline(session)}")
+        except RuntimeError as error:
+            print(f"⚠️  Baseline failed: {error}")
 
 
 if __name__ == "__main__":
     try:
         main()
     except (KeyboardInterrupt, EOFError):
-        print("\nStopped.")
+        print("\nStopped without approving.")
