@@ -278,6 +278,60 @@ before publication.
     return prompt.strip()
 
 
+def build_messages(
+    retrieved_context,
+    user_request,
+    brand_voice,
+    previous_draft=None,
+    feedback=None,
+):
+    """Return the system and user prompts expected by the content pipeline."""
+    system = (
+        "You are a careful professional content writer. "
+        "Use only the supplied context, never fabricate personal experiences, "
+        "credentials, clients, numbers, or achievements, and return only the draft."
+    )
+    user = build_prompt(retrieved_context, user_request, brand_voice)
+
+    if previous_draft and feedback:
+        user += (
+            "\n\n--------------------------------------------------\n"
+            "REVISION REQUEST\n"
+            "--------------------------------------------------\n"
+            f"Previous draft:\n{previous_draft}\n\n"
+            f"Human feedback:\n{feedback}\n\n"
+            "Rewrite the previous draft according to the feedback. "
+            "Keep the same factual and anti-fabrication rules."
+        )
+
+    return system, user
+
+
+def build_baseline_prompt(user_request):
+    """Build a generic prompt for comparison without consultant or RAG context."""
+    platform = user_request.get("platform", DEFAULT_PLATFORM).strip().lower()
+    content_format = user_request.get("format", DEFAULT_FORMAT).strip().lower()
+    topic = user_request.get("topic", "").strip()
+    if not topic:
+        raise ValueError("A content topic is required.")
+    if platform not in PLATFORM_RULES:
+        raise ValueError(f"Unsupported platform: {platform}. Choose from: {list(PLATFORM_RULES)}")
+    if content_format not in FORMAT_RULES:
+        raise ValueError(f"Unsupported format: {content_format}. Choose from: {list(FORMAT_RULES)}")
+
+    return f"""Write a {platform} draft about: {topic}
+
+Target audience: {user_request.get('audience', 'General audience')}
+Objective: {user_request.get('objective', 'Educate')}
+Format: {content_format}
+
+{PLATFORM_RULES[platform]}
+{FORMAT_RULES[content_format]}
+
+Do not invent personal experiences, credentials, clients, numbers, or achievements.
+Return only the finished content.""".strip()
+
+
 # --------------------------------------------------
 # 5. LOCAL TEST
 # --------------------------------------------------
