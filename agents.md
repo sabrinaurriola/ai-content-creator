@@ -10,6 +10,7 @@ Scope: see our Musts → [Musts list](LINK-TO-MUSTS)
 ## Stack & run
 - Python 3.12 · `pip install -r requirements.txt`
 - Run: `python src/main.py "topic" linkedin jane_doe` · free test run: add `--mock` · options: `--help`
+- Web UI (Gradio): `python src/app.py` → http://127.0.0.1:7860 · tick "Free test run" for mock
 - Env (`.env`, never committed, loaded by `main.py`): `OPENAI_API_KEY`, `LLM_MODEL`. Template: `.env.example`
 
 ## Repo map
@@ -22,6 +23,7 @@ src/prompt_templates.py     all prompt wording: system + user prompt, revisions,
 src/llm_integration.py      the only file that talks to the OpenAI API
 src/content_pipeline.py     runs the steps in order, saves drafts and the approved post
 src/main.py                 command-line entry point, loads .env, human review
+src/app.py                  Gradio web UI: same pipeline, review with buttons (UI only, no logic)
 outputs/<platform>_<consultant>_<time>.md    approved post, ready to publish
 outputs/drafts/             every draft + feedback (.json), generic baseline (--baseline)
 ```
