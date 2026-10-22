@@ -54,17 +54,19 @@ def split_linkedin_profile(text, source, file_name):
 
 # ---------- 3. Load everything ----------
 def load_knowledge_base(kb_dir=KB_DIR):
-    """Read every .md and .pdf file in primary/ and secondary/ and return all pieces."""
+    """Read every .md and .pdf file in primary/ and secondary/ and return all pieces.
+    'file' is the path inside the source folder, e.g. 'elif_yurdakul/services.md'."""
     pieces = []
     for source in ["primary", "secondary"]:
         folder = Path(kb_dir) / source
         if not folder.exists():
             raise FileNotFoundError(f"[document_processor] Folder not found: {folder}")
         for path in sorted(folder.rglob("*")):
+            file_name = path.relative_to(folder).as_posix()
             if path.suffix == ".md":
-                pieces += split_markdown(path.read_text(encoding="utf-8"), source, path.name)
+                pieces += split_markdown(path.read_text(encoding="utf-8"), source, file_name)
             elif path.suffix == ".pdf":
-                pieces += split_linkedin_profile(read_pdf(path), source, path.name)
+                pieces += split_linkedin_profile(read_pdf(path), source, file_name)
     return pieces
 
 

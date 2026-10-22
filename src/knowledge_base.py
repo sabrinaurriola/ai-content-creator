@@ -1,4 +1,9 @@
-"""Embed the Ironhack docs once, then find the most relevant chunks for a request."""
+"""Embed the Ironhack docs once, then find the most relevant chunks for a request.
+
+Only secondary documents are indexed. The consultant's own files (primary) are small
+and injected whole into the prompt (see rag_decision.md), so they are never searched.
+"""
+import hashlib
 import json
 
 import numpy as np
@@ -20,40 +25,47 @@ def embed(texts):
 
 
 # ---------- 2. Build the index once, then reuse it ----------
-def build_index(force=False):
+def _fingerprint(chunks):
+    """Changes whenever a secondary document changes, so the cache is rebuilt."""
+    raw = json.dumps([EMBED_MODEL, chunks], sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def build_index(pieces=None, force=False):
+    """Return {"chunks", "vectors"} for the secondary documents (cached in data/)."""
+    pieces = load_knowledge_base() if pieces is None else pieces
+    chunks = chunk_for_rag([p for p in pieces if p["source"] == "secondary"])
+    fingerprint = _fingerprint(chunks)
+
     if CACHE_FILE.exists() and not force:
         data = json.loads(CACHE_FILE.read_text())
-        return data["chunks"], np.array(data["vectors"])
+        if data.get("fingerprint") == fingerprint:
+            return {"chunks": data["chunks"], "vectors": np.array(data["vectors"])}
 
-    pieces = load_knowledge_base()
-    secondary = [p for p in pieces if p["source"] == "secondary"]
-    chunks = chunk_for_rag(secondary)
-    vectors = embed([f'{c["heading"]}\n{c["text"]}' for c in chunks])
-
+    vectors = embed([f'{c["heading"]}\n{c["text"]}' for c in chunks]) if chunks else np.zeros((0, 1))
     CACHE_FILE.parent.mkdir(exist_ok=True)
     CACHE_FILE.write_text(json.dumps(
-        {"model": EMBED_MODEL, "chunks": chunks, "vectors": vectors.tolist()}))
-    return chunks, vectors
+        {"model": EMBED_MODEL, "fingerprint": fingerprint,
+         "chunks": chunks, "vectors": vectors.tolist()}))
+    return {"chunks": chunks, "vectors": vectors}
 
 
 # ---------- 3. Find the best chunks for a question ----------
-def search(query, chunks, vectors, top_k=3, min_score=0.3):
+def search(index, query, k=3, min_score=0.3):
+    """Top-k research chunks for the query, each with its similarity score."""
+    chunks, vectors = index["chunks"], index["vectors"]
+    if not chunks:
+        return []
     q = embed([query])[0]
     scores = vectors @ q / (np.linalg.norm(vectors, axis=1) * np.linalg.norm(q))
-    best = np.argsort(scores)[::-1][:top_k]
+    best = np.argsort(scores)[::-1][:k]
     return [{**chunks[i], "score": float(scores[i])}
             for i in best if scores[i] >= min_score]
 
 
-# ---------- 4. The consultant profile is injected whole, not searched ----------
-def get_profile_context(pieces):
-    return "\n\n".join(f'### {p["heading"]}\n{p["text"]}'
-                       for p in pieces if p["source"] == "primary")
-
-
 if __name__ == "__main__":
-    chunks, vectors = build_index()
-    print(f"📚 Index: {len(chunks)} chunks, {vectors.shape[1]} numbers each")
+    index = build_index()
+    print(f"📚 Index: {len(index['chunks'])} chunks, {index['vectors'].shape[1]} numbers each")
 
     questions = [
         "What will students learn about the EU AI Act?",
@@ -62,7 +74,7 @@ if __name__ == "__main__":
     ]
     for q in questions:
         print(f"\n🔎 {q}")
-        results = search(q, chunks, vectors)
+        results = search(index, q)
         if not results:
             print("   (no chunk above the threshold)")
         for r in results:

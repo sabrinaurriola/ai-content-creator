@@ -1,7 +1,13 @@
 # Ironhack AI Consulting Bootcamp – Program (Syllabus 2026)
 
 
-## Why Study AI (syllabus p.7)
+## Why Study  (syllabus p.7)
+in 2026?
+Study AI Consulting
+in 2026: 
+→
+→
+→
 →
 →In 2026, organizations across industries will continue shifting 
 from experimentation to real AI adoption, creating a 
@@ -24,7 +30,9 @@ fluency, ethical frameworks, and business strategy
 to ensure successful adoption and measurable 
 outcomes.
 
-## Learning Outcomes (syllabus p.8)
+## Learning (syllabus p.8)
+Outcomes
+By the end of the program, you will be able to:
 Build and automate workflows using Python, no-code, 
 and low-code tools.
 Integrate and evaluate AI APIs (OpenAI, Anthropic, 
@@ -47,25 +55,32 @@ clients and stakeholders.
 →
 →
 
-## What are the job available to AI consultant  (syllabus p.9)
+## What are the job available to me  (syllabus p.9)
+after bootcamp completion ?
 AI Consultant (Junior)
-AI Project Coordinator
-Automation Consultant 
-AI Product Associate
+🚀AI Project Coordinator
+💻
+Automation Consultant ✍️
+📱AI Product Associate
+and many more!!
+🤖
 For graduates with professional experience:
 AI Integration Consultant | AI Project Manager | AI Solutions 
 Architect | Business Transformation Consultant | and many more 
 opportunities!
+*Disclaimer: We do not guarantee job placements, but we work very hard to get you employed! 
 
-
-## Tools AI Consultant Is Able To Use (syllabus p.10)
+## Tools (syllabus p.10)
+Overview
 Programing & AI APIs
 Automation & No-code Platforms
 Data & Evaluation Tools
 Compliance & Governance
+NOTE: These are just some of the tools you’ll get hands-on with in the course — think of them 
+as examples, not the full list. We’ll keep things fresh and adapt to the best tools available.
 
-
-## Course Overview (syllabus p.11)
+## Course (syllabus p.11)
+Overview
 “Learn by doing” is the best way to describe Ironhack’s   
 educational methodology. 
 We aim to translate our learning experiences into real-life 
@@ -80,7 +95,8 @@ Bootcamp
 Career
 Hack
 
-## What this Course is About  (syllabus p.12)
+## What this   (syllabus p.12)
+Course is About
 Helping organizations unlock the power of AI
 This course prepares you to guide companies through the process 
 of adopting AI, from identifying opportunities to implementing real 
@@ -102,7 +118,8 @@ By the end, you’ll be able to lead AI transformation projects guiding
 teams from strategy to execution while ensuring solutions are 
 ethical, efficient, and aligned with organizational goals.
 
-## What AI Consultant will Build in this Course (syllabus p.13)
+## What you will  (syllabus p.13)
+Build in this Course
 AI O pportunity Assessment
 Feasibility & Impact Analysis
 Evaluate business processes, 
@@ -135,16 +152,23 @@ dashboards to measure the
 outcomes of AI adoption.
 Capstone Project
 
-## Prework Consulting. Topics include (syllabus p.14)
+## Prework (syllabus p.14)
+40+ hours
+You will be introduced to Ironhack’s online platform, 
+where you will have access to all bootcamp materials 
+starting from prework, which will cover the concepts of AI 
+Consulting. Topics include:
 Learn the history of AI, explore key roles in the field, and understand 
 how projects succeed or fail. 
 Get introduced to how engineers train models and build your 
 foundation in programming to start creating small AI projects.
 Key skills: AI history · model training basics · intro to programming.
 
-## Course modules – part 1 (syllabus p.15)
+## bootcamp (syllabus p.15)
 360+ TOTAL HOURS
-AI Consultant cover the following topics and skills:
+Here you will start your learning journey  with your fellow 
+classmates. Utilising cohort-based learning, you'll cover 
+the following topics and skills:
 AI Literacy
 Understand the fundamentals of AI, 
 machine learning, and Python for 
@@ -175,7 +199,7 @@ p r o j ects .
 Apply agile methodologies ( K an b an, X P) to manage 
 AI delivery cycles.
 
-## Course modules – part 2 (syllabus p.15)
+## bootcamp (syllabus p.16)
 Learn how to communicate technical concepts clearly to non-
 technical stakeholders.
 Build business cases and validated automation proposals for 

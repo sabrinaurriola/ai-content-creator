@@ -10,9 +10,13 @@ Run every step in order, add the human review, save the result.
     4. Save the approved post in outputs/
 
 Needs from knowledge_base.py (File 2):
-    build_index(pieces)                          -> index
-    search(index, query, k, source, consultant)  -> list of chunk dicts
+    build_index(pieces)        -> index of the secondary documents
+    search(index, query, k)    -> list of chunk dicts
         each chunk: {"source", "file", "heading", "text", ...}
+
+Consultants: one folder per consultant in knowledge_base/primary/
+(e.g. elif_yurdakul/ with profile PDF, past posts, services). All of that
+consultant's files go into the prompt whole; they are not searched.
 
 This module contains no prompt wording (see prompt_templates.py)
 and no API code (see llm_integration.py).
@@ -37,13 +41,17 @@ except ImportError:
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "outputs"
 DRAFTS_DIR = OUTPUT_DIR / "drafts"
-MAX_BRAND_VOICE_CHARS = 3000
-RESEARCH_CHUNKS = 5          # secondary chunks per post
-PROFILE_CHUNKS = 3           # extra topic-relevant profile chunks
-BRAND_SECTIONS = ["Header", "Summary", "Top Skills", "Experience", "Certifications"]
+MAX_BRAND_VOICE_CHARS = 20000   # whole profile + services + past posts (~5k tokens)
+RESEARCH_CHUNKS = 5             # secondary chunks per post
 
 KB_NOT_READY = ("knowledge_base.py is not ready yet: it needs "
-                "build_index(pieces) and search(index, query, k, source, consultant).")
+                "build_index(pieces) and search(index, query, k).")
+
+
+def consultant_of(file_name):
+    """'elif_yurdakul/services.md' -> 'elif_yurdakul'; a loose file 'jane_doe.pdf' -> 'jane_doe'."""
+    parts = Path(file_name).parts
+    return parts[0] if len(parts) > 1 else Path(file_name).stem
 
 
 class ContentPipeline:
@@ -66,14 +74,14 @@ class ContentPipeline:
         return {"pieces": len(self.pieces), "consultants": self.list_consultants()}
 
     def list_consultants(self):
-        """Every file in primary/ is one consultant, named by file stem (jane_doe)."""
-        return sorted({Path(p["file"]).stem for p in self.pieces if p["source"] == "primary"})
+        """Every folder in primary/ is one consultant (a loose file counts as one too)."""
+        return sorted({consultant_of(p["file"]) for p in self.pieces if p["source"] == "primary"})
 
     def resolve_consultant(self, name):
-        """Turn 'jane_doe' into the profile file name, e.g. 'jane_doe.pdf'."""
-        for p in self.pieces:
-            if p["source"] == "primary" and Path(p["file"]).stem.lower() == name.lower():
-                return p["file"]
+        """Match a consultant name case-insensitively, e.g. 'Elif_Yurdakul' -> 'elif_yurdakul'."""
+        for consultant in self.list_consultants():
+            if consultant.lower() == name.lower():
+                return consultant
         raise ValueError(f"Unknown consultant: {name}. "
                          f"Choose from: {', '.join(self.list_consultants())}")
 
@@ -81,25 +89,17 @@ class ContentPipeline:
     # 2. CONTEXT: research chunks + the consultant's own profile
     # --------------------------------------------------
 
-    def _brand_voice(self, consultant_file, topic):
-        """Consultant's core profile sections + their pieces most relevant to the topic."""
-        own = [p for p in self.pieces if p["file"] == consultant_file]
-        core = [p for p in own if p["heading"] in BRAND_SECTIONS]
-        relevant = search(self.index, topic, k=PROFILE_CHUNKS,
-                          source="primary", consultant=consultant_file)
-        selected, seen = [], set()
-        for p in core + relevant:
-            if p["file"] != consultant_file:         # never mix consultants
-                continue
-            key = (p["heading"], p["text"][:50])
-            if key not in seen:
-                seen.add(key)
-                selected.append(f"[{p['heading']}]\n{p['text']}")
-        return "\n\n".join(selected)[:MAX_BRAND_VOICE_CHARS]
+    def _brand_voice(self, consultant):
+        """All of this consultant's files (profile first), each piece labelled with file and heading."""
+        own = [p for p in self.pieces                  # never mix consultants
+               if p["source"] == "primary" and consultant_of(p["file"]) == consultant]
+        own.sort(key=lambda p: Path(p["file"]).suffix != ".pdf")   # stable: keeps file order
+        text = "\n\n".join(f"[{Path(p['file']).name} › {p['heading']}]\n{p['text']}" for p in own)
+        return text[:MAX_BRAND_VOICE_CHARS]
 
     def _context(self, topic):
         """Research chunks for the topic, each labelled with its source."""
-        chunks = search(self.index, topic, k=RESEARCH_CHUNKS, source="secondary", consultant=None)
+        chunks = search(self.index, topic, k=RESEARCH_CHUNKS)
         sources = [f"[S{i}] {c['file']} › {c['heading']}" for i, c in enumerate(chunks, 1)]
         context = "\n\n".join(f"{s}\n{c['text']}" for s, c in zip(sources, chunks))
         return context or "No relevant research found for this topic.", sources
@@ -110,11 +110,11 @@ class ContentPipeline:
 
     def start_session(self, consultant, request):
         """Prepare everything needed to write one post."""
-        consultant_file = self.resolve_consultant(consultant)
+        consultant = self.resolve_consultant(consultant)
         context, sources = self._context(request["topic"])
-        name = f"{request['platform']}_{Path(consultant_file).stem}_{datetime.now():%Y%m%d-%H%M}"
-        return {"name": name, "consultant": consultant_file, "request": dict(request),
-                "brand_voice": self._brand_voice(consultant_file, request["topic"]),
+        name = f"{request['platform']}_{consultant}_{datetime.now():%Y%m%d-%H%M}"
+        return {"name": name, "consultant": consultant, "request": dict(request),
+                "brand_voice": self._brand_voice(consultant),
                 "context": context, "sources": sources, "versions": []}
 
     def last_good_draft(self, session):
