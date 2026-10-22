@@ -6,7 +6,7 @@ Responsibility:
 Send a finished prompt (from prompt_templates.py) to an LLM and return
 the generated draft plus metadata (model, tokens, cost, latency, status).
 
-Supported providers: "openai", "anthropic", and "mock" (free, offline,
+Supported providers: "openai" and "mock" (free, offline,
 for testing the pipeline without an API key).
 
 This module does NOT build prompts and does NOT retrieve context.
@@ -30,11 +30,10 @@ except ImportError:
 
 DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
 
-# Change these in .env (OPENAI_MODEL=..., ANTHROPIC_MODEL=...).
+# Change these in .env (OPENAI_MODEL=...).
 # Check each provider's model list for the current names.
 DEFAULT_MODELS = {
     "openai": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-    "anthropic": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5"),
     "mock": "mock-model",
 }
 
@@ -67,28 +66,16 @@ def _call_openai(prompt, model, max_tokens, temperature, timeout, retries):
     return response.output_text, usage.input_tokens, usage.output_tokens
 
 
-def _call_anthropic(prompt, model, max_tokens, temperature, timeout, retries):
-    from anthropic import Anthropic
-    client = Anthropic(timeout=timeout, max_retries=retries)  # key from ANTHROPIC_API_KEY
-    params = {"model": model, "max_tokens": max_tokens,
-              "messages": [{"role": "user", "content": prompt}]}
-    if temperature is not None:
-        params["temperature"] = temperature
-    response = client.messages.create(**params)
-    text = "".join(block.text for block in response.content if block.type == "text")
-    return text, response.usage.input_tokens, response.usage.output_tokens
-
-
 def _call_mock(prompt, model, max_tokens, temperature, timeout, retries):
     """Fake response so the whole pipeline can be tested for free."""
     topic_line = next((l for l in prompt.splitlines() if l.startswith("Topic:")), "Topic: ?")
     text = (f"[MOCK DRAFT] {topic_line[7:]}\n\n"
             "This is a placeholder post generated without calling an API.\n"
-            "Switch LLM_PROVIDER to 'openai' or 'anthropic' for real content.")
+            "Switch LLM_PROVIDER to 'openai' for real content.")
     return text, len(prompt) // 4, len(text) // 4      # rough token estimate
 
 
-PROVIDERS = {"openai": _call_openai, "anthropic": _call_anthropic, "mock": _call_mock}
+PROVIDERS = {"openai": _call_openai, "mock": _call_mock}
 
 
 # --------------------------------------------------
@@ -115,7 +102,7 @@ def _friendly_error(error):
         "APIConnectionError": "Could not reach the API. Check your internet connection.",
         "BadRequestError": "The API rejected the request (prompt too long or bad parameter).",
         "InternalServerError": "The provider had a server error, even after retries.",
-        "ModuleNotFoundError": "SDK not installed: pip install openai anthropic",
+        "ModuleNotFoundError": "SDK not installed: pip install openai",
     }
     return f"{name}: {messages.get(name, str(error))}"
 
