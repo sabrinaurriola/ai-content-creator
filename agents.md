@@ -15,10 +15,13 @@ Scope: see our Musts → [Musts list](LINK-TO-MUSTS)
 
 ## Repo map
 ```
-knowledge_base/primary/     consultant LinkedIn profiles (.md / .pdf)
+knowledge_base/primary/<consultant>/   one folder per consultant: profile.pdf, past_posts (.pdf/.md), services (.md/.pdf),
+                            voice.md, github.md (saved via the app's "Your profile" tab)
 knowledge_base/secondary/   syllabus + industry research (.md)
 src/document_processor.py   read, split, label, chunk documents
 src/knowledge_base.py       build/load RAG index, search, filter by consultant
+src/github_import.py        public GitHub profile + top projects -> github.md (GitHub API, free)
+src/consultant_profile.py   save a consultant's uploads (profile, past posts, voice, GitHub) to their folder
 src/prompt_templates.py     all prompt wording: system + user prompt, revisions, baseline
 src/llm_integration.py      the only file that talks to the OpenAI API
 src/content_pipeline.py     runs the steps in order, saves drafts and the approved post

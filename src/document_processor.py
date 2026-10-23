@@ -59,14 +59,20 @@ def load_knowledge_base(kb_dir=KB_DIR):
     pieces = []
     for source in ["primary", "secondary"]:
         folder = Path(kb_dir) / source
+        if source == "primary" and not folder.exists():
+            continue                      # no consultants yet: add one in the app
         if not folder.exists():
             raise FileNotFoundError(f"[document_processor] Folder not found: {folder}")
         for path in sorted(folder.rglob("*")):
             file_name = path.relative_to(folder).as_posix()
             if path.suffix == ".md":
                 pieces += split_markdown(path.read_text(encoding="utf-8"), source, file_name)
-            elif path.suffix == ".pdf":
+            elif path.suffix == ".pdf" and path.stem.startswith("profile"):
                 pieces += split_linkedin_profile(read_pdf(path), source, file_name)
+            elif path.suffix == ".pdf":                       # e.g. past_posts.pdf: one piece
+                heading = path.stem.replace("_", " ").capitalize()
+                pieces += [p for p in [make_piece(source, file_name, heading,
+                                                  read_pdf(path).splitlines())] if p["text"]]
     return pieces
 
 

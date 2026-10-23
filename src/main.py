@@ -26,10 +26,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Write a post in a consultant's own voice.")
     parser.add_argument("topic", help='What the post is about, e.g. "When should companies use RAG?"')
     parser.add_argument("platform", choices=list(PLATFORM_RULES), type=str.lower)
-    parser.add_argument("consultant", help="Profile file name without extension, e.g. jane_doe")
+    parser.add_argument("consultant", help="Folder name in knowledge_base/primary/, e.g. jane_doe")
     parser.add_argument("--format", default=DEFAULT_FORMAT, choices=list(FORMAT_RULES))
     parser.add_argument("--audience", default="Business leaders")
     parser.add_argument("--objective", default="Educate")
+    parser.add_argument("--tone", default="", help="Tone for this post (default: the saved voice)")
     parser.add_argument("--extra", default="", help="Extra instructions for the writer")
     parser.add_argument("--mock", action="store_true", help="Free test run, no API call")
     parser.add_argument("--baseline", action="store_true",
@@ -67,15 +68,21 @@ def main():
         stats = pipeline.prepare_knowledge_base()
         request = {"topic": args.topic, "platform": args.platform, "format": args.format,
                    "audience": args.audience, "objective": args.objective,
-                   "additional_instructions": args.extra}
+                   "tone": args.tone, "additional_instructions": args.extra}
         session = pipeline.start_session(args.consultant, request)
     except (RuntimeError, ValueError, FileNotFoundError) as error:
         sys.exit(f"❌ {error}")
 
     print(f"📚 {stats['pieces']} pieces loaded · consultant: {session['consultant']}")
-    print("🔎 Sources used:")
-    for source in session["sources"] or ["(none found)"]:
+    print(f"🔎 Searched for: {session['search_query']}\n   Your material used:")
+    for anchor in session["anchors"] or ["(none found)"]:
+        print(f"   “{anchor}”")
+    print("   Sources used:")
+    for source in session["sources"]:
         print(f"   {source}")
+    if not session["strong_sources"]:
+        print("⚠️  Only loosely related research found for this topic: the draft relies "
+              "mostly on the profile. Check every fact before approving.")
     show(pipeline.run(session))
 
     # Human review: feedback -> rewrite, Enter -> approve, q -> quit

@@ -1,5 +1,6 @@
-openai
-python-dotenv
-pypdf
-langchain-text-splitters
-gradio
+openai>=1.0
+python-dotenv>=1.0
+pypdf>=4.0
+langchain-text-splitters>=0.3
+numpy>=1.26
+gradio>=6.0

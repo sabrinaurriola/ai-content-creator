@@ -15,18 +15,21 @@ Needs from knowledge_base.py (File 2):
         each chunk: {"source", "file", "heading", "text", ...}
 
 Consultants: one folder per consultant in knowledge_base/primary/
-(e.g. elif_yurdakul/ with profile PDF, past posts, services). All of that
-consultant's files go into the prompt whole; they are not searched.
+(profile.pdf, past_posts, services, github.md; see consultant_profile.py).
+All of that consultant's files go into the prompt whole; they are not searched.
+voice.md is used as the default tone instead.
 
 This module contains no prompt wording (see prompt_templates.py)
 and no API code (see llm_integration.py).
 """
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
 from document_processor import load_knowledge_base
-from prompt_templates import build_messages, build_baseline_prompt
+from prompt_templates import (build_messages, build_baseline_prompt, build_search_query_prompt,
+                              build_anchor_prompt)
 from llm_integration import generate_content
 
 try:
@@ -41,8 +44,16 @@ except ImportError:
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "outputs"
 DRAFTS_DIR = OUTPUT_DIR / "drafts"
-MAX_BRAND_VOICE_CHARS = 20000   # whole profile + services + past posts (~5k tokens)
+MAX_BRAND_VOICE_CHARS = 24000   # profile + services + past posts + GitHub (~6k tokens)
 RESEARCH_CHUNKS = 5             # secondary chunks per post
+STRONG_SCORE = 0.30             # similarity for "relevant" research
+RELATED_SCORE = 0.20            # below this a chunk is unrelated and never sent
+VOICE_FILE = "voice.md"         # the consultant's own tone description
+FILE_ORDER = ["profile", "services", "past_posts", "github"]   # if too long, the end is cut
+
+NO_MATCH = ("No research matches the topic \"{topic}\" (searched for: \"{query}\"). "
+            "No draft was written. Check the spelling or rephrase the topic, "
+            "or pick one the Ironhack documents cover.")
 
 KB_NOT_READY = ("knowledge_base.py is not ready yet: it needs "
                 "build_index(pieces) and search(index, query, k).")
@@ -54,10 +65,17 @@ def consultant_of(file_name):
     return parts[0] if len(parts) > 1 else Path(file_name).stem
 
 
+def _file_rank(file_name):
+    """Position of a file in FILE_ORDER (unknown files go last)."""
+    stem = Path(file_name).stem
+    return next((i for i, prefix in enumerate(FILE_ORDER) if stem.startswith(prefix)),
+                len(FILE_ORDER))
+
+
 class ContentPipeline:
 
     def __init__(self, mock=False):
-        self.provider = "mock" if mock else "openai"
+        self.provider = "mock" if mock else "openai"     # default; a session can override it
         self.pieces = []
         self.index = None
 
@@ -71,7 +89,14 @@ class ContentPipeline:
             raise RuntimeError(KB_NOT_READY)
         self.pieces = load_knowledge_base()
         self.index = build_index(self.pieces)
+        if not self.index["chunks"]:                     # never write without research documents
+            raise RuntimeError("No research documents found in knowledge_base/secondary/.")
         return {"pieces": len(self.pieces), "consultants": self.list_consultants()}
+
+    def forget_consultant(self, consultant):
+        """Drop a consultant's pieces from memory (their folder was deleted)."""
+        self.pieces = [p for p in self.pieces
+                       if not (p["source"] == "primary" and consultant_of(p["file"]) == consultant)]
 
     def list_consultants(self):
         """Every folder in primary/ is one consultant (a loose file counts as one too)."""
@@ -89,33 +114,102 @@ class ContentPipeline:
     # 2. CONTEXT: research chunks + the consultant's own profile
     # --------------------------------------------------
 
+    def _own_pieces(self, consultant):
+        """This consultant's pieces only (never mix consultants)."""
+        return [p for p in self.pieces
+                if p["source"] == "primary" and consultant_of(p["file"]) == consultant]
+
+    def voice_description(self, consultant):
+        """The consultant's saved tone (voice.md), or '' if there is none."""
+        return "\n".join(p["text"] for p in self._own_pieces(consultant)
+                         if Path(p["file"]).name == VOICE_FILE)
+
     def _brand_voice(self, consultant):
-        """All of this consultant's files (profile first), each piece labelled with file and heading."""
-        own = [p for p in self.pieces                  # never mix consultants
-               if p["source"] == "primary" and consultant_of(p["file"]) == consultant]
-        own.sort(key=lambda p: Path(p["file"]).suffix != ".pdf")   # stable: keeps file order
+        """All of this consultant's files in FILE_ORDER, each piece labelled with file and heading."""
+        own = [p for p in self._own_pieces(consultant) if Path(p["file"]).name != VOICE_FILE]
+        own.sort(key=lambda p: _file_rank(p["file"]))      # stable: keeps order inside a file
         text = "\n\n".join(f"[{Path(p['file']).name} › {p['heading']}]\n{p['text']}" for p in own)
         return text[:MAX_BRAND_VOICE_CHARS]
 
+    def _search_query(self, topic, provider):
+        """Fix typos and expand short topics before searching ('sbersucurity' -> 'cybersecurity').
+        Mock: the topic as typed. If the call fails, the topic as typed."""
+        if provider == "mock":
+            return topic
+        system, user = build_search_query_prompt(topic)
+        result = generate_content(user, system=system, provider=provider,
+                                  max_tokens=40, temperature=0)
+        query = result["text"].strip().strip('"') if result["status"] == "success" else ""
+        return query or topic
+
+    def _anchors(self, consultant, brand_voice, topic, provider):
+        """2-3 exact quotes from the consultant's material that fit the topic.
+        Every quote is checked against the files; invented ones are dropped.
+        Fallback (mock, failed call, nothing valid): the start of their profile Summary."""
+        def norm(text):                                  # ignore spacing: PDFs often lose it
+            return re.sub(r"\s+", "", text).strip('"“”-•').lower()
+        anchors = []
+        if provider != "mock":
+            system, user = build_anchor_prompt(brand_voice, topic)
+            result = generate_content(user, system=system, provider=provider,
+                                      max_tokens=200, temperature=0)
+            if result["status"] == "success":
+                source = norm(brand_voice)
+                for line in result["text"].splitlines():
+                    quote = re.sub(r"\s+", " ", line).strip(' "“”-•')
+                    if len(quote) > 15 and norm(quote) in source:
+                        anchors.append(quote)
+        if not anchors:
+            summary = [p["text"] for p in self._own_pieces(consultant) if p["heading"] == "Summary"]
+            if summary:
+                text = re.sub(r"\s+", " ", summary[0])
+                anchors = [re.sub(r"([.!?])(?=[A-Z])", r"\1 ", text)[:300]]
+        return anchors[:3]
+
     def _context(self, topic):
-        """Research chunks for the topic, each labelled with its source."""
-        chunks = search(self.index, topic, k=RESEARCH_CHUNKS)
-        sources = [f"[S{i}] {c['file']} › {c['heading']}" for i, c in enumerate(chunks, 1)]
+        """Research chunks for the topic, labelled with source and strength.
+        Returns (context, sources, number of strong matches). A failed search stops the
+        post with an error: it never silently continues without research."""
+        try:
+            chunks = search(self.index, topic, k=RESEARCH_CHUNKS, min_score=RELATED_SCORE)
+        except Exception as error:
+            raise RuntimeError(f"Could not search the research documents ({error}). "
+                               "No draft was written; please try again.") from error
+        sources = []
+        for i, c in enumerate(chunks, 1):
+            label = "" if c["score"] >= STRONG_SCORE else " (loosely related)"
+            sources.append(f"[S{i}] {c['file']} › {c['heading']}{label}")
+        strong = sum(c["score"] >= STRONG_SCORE for c in chunks)
         context = "\n\n".join(f"{s}\n{c['text']}" for s, c in zip(sources, chunks))
-        return context or "No relevant research found for this topic.", sources
+        return context or "No relevant research found for this topic.", sources, strong
 
     # --------------------------------------------------
     # 3. SESSION: one post, its drafts and the approval
     # --------------------------------------------------
 
-    def start_session(self, consultant, request):
-        """Prepare everything needed to write one post."""
+    def start_session(self, consultant, request, provider=None):
+        """Prepare everything needed to write one post.
+        Stops (ValueError) when no research matches: a post is never written without data."""
+        provider = provider or self.provider
         consultant = self.resolve_consultant(consultant)
-        context, sources = self._context(request["topic"])
+        request = dict(request)
+        if not (request.get("tone") or "").strip():          # empty tone -> the saved voice
+            request.pop("tone", None)
+            if self.voice_description(consultant):
+                request["tone"] = self.voice_description(consultant)
+        brand_voice = self._brand_voice(consultant)
+        if not brand_voice.strip():                      # never write a generic post
+            raise ValueError(f"No readable profile for {consultant}. Save the profile again.")
+        query = self._search_query(request["topic"], provider)
+        context, sources, strong = self._context(query)
+        if not sources:
+            raise ValueError(NO_MATCH.format(topic=request["topic"], query=query))
+        anchors = self._anchors(consultant, brand_voice, query, provider)
         name = f"{request['platform']}_{consultant}_{datetime.now():%Y%m%d-%H%M}"
-        return {"name": name, "consultant": consultant, "request": dict(request),
-                "brand_voice": self._brand_voice(consultant),
-                "context": context, "sources": sources, "versions": []}
+        return {"name": name, "consultant": consultant, "request": request,
+                "provider": provider, "search_query": query, "anchors": anchors,
+                "brand_voice": brand_voice, "context": context, "sources": sources,
+                "strong_sources": strong, "versions": []}
 
     def last_good_draft(self, session):
         """The latest version that generated successfully, or None."""
@@ -128,8 +222,9 @@ class ContentPipeline:
         system, user = build_messages(
             session["context"], session["request"], session["brand_voice"],
             previous_draft=previous["text"] if previous and feedback else None,
-            feedback=feedback)
-        result = generate_content(user, system=system, provider=self.provider)
+            feedback=feedback, anchors=session.get("anchors"))
+        provider = session.get("provider") or self.provider    # per session: safe for many users
+        result = generate_content(user, system=system, provider=provider)
         version = {**result,
                    "version": len(session["versions"]) + 1, "feedback": feedback,
                    "status": "draft" if result["status"] == "success" else "failed"}
@@ -151,7 +246,7 @@ class ContentPipeline:
     def generate_baseline(self, session):
         """Generic post (no brand voice, no RAG), saved next to the drafts."""
         prompt = build_baseline_prompt(session["request"])
-        result = generate_content(prompt, provider=self.provider)
+        result = generate_content(prompt, provider=session.get("provider") or self.provider)
         session["baseline"] = {**result, "prompt": prompt}
         self._save_drafts(session)
         if result["status"] == "success":
